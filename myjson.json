@@ -1,0 +1,14 @@
+[
+  {
+    "sender": "user",
+    "text": "hello"
+  },
+  {
+    "sender": "bot",
+    "text": "Đây là lời giải:\n$$ 2x^2+4x-1=0 $$\nSử dụng công thức nghiệm của phương trình bậc hai $ax^2+bx+c=0$, ta có $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$.\nTrong đó: $a=2$, $b=4$, $c=-1$.\n\nTính delta ($\\Delta$):\n$$ \\Delta = b^2 - 4ac = 4^2 - 4(2)(-1) $$\n$$ \\Delta = 16 + 8 $$\n$$ \\Delta = 24 $$\nVì $\\Delta > 0$, phương trình có hai nghiệm phân biệt:\n$$ x = \\frac{-4 \\pm \\sqrt{24}}{2(2)} $$\n$$ x = \\frac{-4 \\pm \\sqrt{4 \\cdot 6}}{4} $$\n$$ x = \\frac{-4 \\pm 2\\sqrt{6}}{4} $$\nChia cả tử và mẫu cho 2:\n$$ x = \\frac{-2 \\pm \\sqrt{6}}{2} $$\nVậy hai nghiệm của phương trình là:\n$$ x_1 = \\frac{-2 + \\sqrt{6}}{2} $$\n$$ x_2 = \\frac{-2 - \\sqrt{6}}{2} $$"
+  },
+  {
+    "sender": "bot",
+    "text": "bot\nĐây là lời giải:\n2\nx\n2\n+\n4\nx\n−\n1\n=\n0\n2x \n2\n +4x−1=0\nSử dụng công thức nghiệm của phương trình bậc hai \na\nx\n2\n+\nb\nx\n+\nc\n=\n0\nax \n2\n +bx+c=0, ta có \nx\n=\n−\nb\n±\nb\n2\n−\n4\na\nc\n2\na\nx= \n2a\n−b± \nb \n2\n −4ac\n​\n \n​\n . Trong đó: \na\n=\n2\na=2, \nb\n=\n4\nb=4, \nc\n=\n−\n1\nc=−1. Tính delta (\nΔ\nΔ):\nΔ\n=\nb\n2\n−\n4\na\nc\n=\n4\n2\n−\n4\n(\n2\n)\n(\n−\n1\n)\nΔ=b \n2\n −4ac=4 \n2\n −4(2)(−1)\nΔ\n=\n16\n+\n8\nΔ=16+8"
+  }
+]

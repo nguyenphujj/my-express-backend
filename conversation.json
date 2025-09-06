@@ -1,0 +1,52 @@
+[
+  {
+    "conversationId": "111",
+    "title": "Weekend Plans",
+    "participants": [
+      { "username": "alice" },
+      { "username": "bob" }
+    ],
+    "mymessages": [
+      {
+        "id": 1,
+        "sender": "alice",
+        "content": "Hey Bob, any plans for the weekend?"
+      },
+      {
+        "id": 2,
+        "sender": "bob",
+        "content": "Not yet! Want to go hiking?"
+      },
+      {
+        "id": 3,
+        "sender": "alice",
+        "content": "Sounds perfect! Let's do it."
+      }
+    ]
+  },
+  {
+    "conversationId": "222",
+    "title": "Work Chat",
+    "participants": [
+      { "username": "carol" },
+      { "username": "dave" }
+    ],
+    "mymessages": [
+      {
+        "id": 1,
+        "sender": "carol",
+        "content": "Hey Dave, did you finish the quarterly report?"
+      },
+      {
+        "id": 2,
+        "sender": "dave",
+        "content": "Almost done, just need to double-check the numbers. I’ll send it over by EOD."
+      },
+      {
+        "id": 3,
+        "sender": "carol",
+        "content": "Great, thanks! Let me know if you need help with anything."
+      }
+    ]
+  }
+]
