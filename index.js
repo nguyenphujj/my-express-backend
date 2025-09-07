@@ -7,6 +7,17 @@ const PORT = process.env.PORT || 5001;
 const cors = require('cors');
 app.use(cors());
 
+const allowedOrigins = [
+  "http://localhost:5173", // local dev
+  "https://my-express-backend-gyj9.onrender.com" // replace with your actual frontend Render URL
+];
+app.use(cors({
+  origin: allowedOrigins,
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+
 const fs = require('fs');
 
 // Middleware
