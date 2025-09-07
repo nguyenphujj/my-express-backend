@@ -41,6 +41,33 @@ app.post('/save-myjson', (req, res) => {
 
 
 
+function safeEval(expr) {
+  // Only allow numbers, +, -, *, /, parentheses, decimal points, and spaces
+  if (!/^[\d+\-*/().\s]+$/.test(expr)) {
+    throw new Error('Invalid characters in expression');
+  }
+  // eslint-disable-next-line no-eval
+  return Function('"use strict";return (' + expr + ')')();
+}
+app.post('/calculate', (req, res) => {
+  const { expr } = req.body;
+  if (!expr) {
+    return res.status(400).json({ error: 'No expression provided' });
+  }
+  try {
+    const result = safeEval(expr);
+    res.json({ result: result.toString() });
+  } catch (err) {
+    res.json({ error: 'Invalid expression' });
+  }
+});
+
+
+
+
+
+
+
 
 
 
