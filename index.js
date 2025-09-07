@@ -8,8 +8,7 @@ const cors = require('cors');
 app.use(cors());
 
 const allowedOrigins = [
-  "http://localhost:5173", // local dev
-  "https://my-express-backend-gyj9.onrender.com" // replace with your actual frontend Render URL
+  "https://my-express-backend-gyj9.onrender.com"
 ];
 app.use(cors({
   origin: allowedOrigins,
