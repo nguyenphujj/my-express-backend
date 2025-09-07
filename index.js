@@ -1,6 +1,7 @@
 const express = require('express');
 const app = express();
-const PORT = 5001;
+const PORT = process.env.PORT || 5001;
+
 
 //this is to allow requests from the frontend
 const cors = require('cors');
@@ -45,7 +46,7 @@ app.post('/save-myjson', (req, res) => {
 
 // Example route
 app.get('/', (req, res) => {
-res.json({ message: 'Hello from the 5001!' });
+res.json({ message: 'Hello from render' });
 });
 
 // Start server
