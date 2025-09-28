@@ -335,7 +335,7 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-5-nano", //gpt-5-nano, gpt-4o-mini
+        model: "gpt-5-nano", //gpt-5-nano, gpt-4o-mini,
         messages: [
           {
             role: "user",
