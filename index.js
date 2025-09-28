@@ -276,7 +276,7 @@ app.post("/api/chat", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: ``,
+        
       },
       body: JSON.stringify({
         model: "gpt-5-mini", //gpt-4o-mini, gpt-5-mini
@@ -324,7 +324,7 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": ``,
+        
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
