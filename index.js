@@ -26,6 +26,12 @@ app.use(express.json());
 
 
 
+//make sure you have installed dotenv
+//make sure you add this ```  Bearer ${OPENAI_API_KEY}  ``` to the authorization below
+require('dotenv').config();
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+//the purpose of this is to hide your api keys from your source code
+//the keys will stay in the env file, and the env file will never be pushed to github, but it will be added to environment in render
 
 
 
@@ -127,9 +133,8 @@ app.get("/foradmin", authenticateTokenVer2, checkIfAdmin, (req, res) => {
 //if backend restarts, this count will be lost, so if you want it to be permanent, you need to keep it in database
 //you can request the entire database and store it in a backend variable, but remember to push data back to database before updating your backend, because updating backend will reset the backend
 const requestCount = {};//if you write requestCount = 0, then it can't distinguish between users, every request increments the same counter
-  //CONST does not make the value immutable, it only means the binding (the variable name) cannot be reassigned
+//CONST does not make the value immutable, it only means the binding (the variable name) cannot be reassigned
 
-  
 //DEPENDING ON: auth
 app.get("/requestcount", authenticateTokenVer2, (req, res) => {
   //after authenticateToken, now you have all the information of the user, like id name role, now you can check those information to grant them access to specific part of your web
@@ -276,7 +281,7 @@ app.post("/api/chat", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
         model: "gpt-5-mini", //gpt-4o-mini, gpt-5-mini
@@ -312,6 +317,7 @@ app.post("/api/chat", async (req, res) => {
 
 
 
+
 const multer = require("multer");
 const upload = multer({ dest: "uploads/" });
 
@@ -324,7 +330,7 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
