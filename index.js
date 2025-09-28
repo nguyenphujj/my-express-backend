@@ -25,13 +25,14 @@ app.use(express.json());
 
 
 
-
 //make sure you have installed dotenv
 //make sure you add this ```  Bearer ${OPENAI_API_KEY}  ``` to the authorization below
 require('dotenv').config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 //the purpose of this is to hide your api keys from your source code
+//and more importantly, to make github allow you to push your backend to github, otherwise it will report error, and solving this error is very complicated
 //the keys will stay in the env file, and the env file will never be pushed to github, but it will be added to environment in render
+
 
 
 
@@ -125,6 +126,7 @@ function checkIfAdmin(req, res, next) {//middleware to detect user role
 //DEPENDING ON: authenticateTokenVer2, checkIfAdmin
 //this endpoint is for admin only
 app.get("/foradmin", authenticateTokenVer2, checkIfAdmin, (req, res) => {
+  console.log(req.ip)
   res.json({ message: `Welcome, ${req.user.username}. This is admin-only.` });
 });
 
