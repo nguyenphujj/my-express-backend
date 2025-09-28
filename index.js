@@ -276,7 +276,7 @@ app.post("/api/chat", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer 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`,
+        Authorization: ``,
       },
       body: JSON.stringify({
         model: "gpt-5-mini", //gpt-4o-mini, gpt-5-mini
@@ -324,7 +324,7 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer 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`,
+        "Authorization": ``,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
