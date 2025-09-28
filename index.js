@@ -331,7 +331,7 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer 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`,
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
