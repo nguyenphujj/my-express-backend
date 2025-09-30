@@ -4,7 +4,7 @@ const PORT = process.env.PORT || 5000;
 
 //this is to allow requests from the frontend
 const cors = require('cors');
-app.use(cors());
+app.use(cors({ origin: "*" }));
 
 const allowedOrigins = [
   "http://localhost:5173", // local dev
@@ -85,9 +85,17 @@ function authenticateToken(req, res, next) {
 
 
 
-
+//✅✅✅✅THIS IS WHERE TOKEN IS CREATED, THE MOST IMPORTANT ENTRY POINT
 app.post("/authVer2", (req, res) => {
-  const { password } = req.body;//extract password from request
+  //req stands for DataStreamFromFrontend
+  //"req" is arbitrary, you can name it anything, it will still mean DataStreamFromFrontend
+  //in DataStreamFromFrontend, there are "headers" and "body"
+  const { password } = req.body;//extract password from DataStreamFromFrontend "body"
+  //"password" is not arbitrary, is it written {password} because the text inside DataStreamFromFrontend.body is {password}
+  //if you write it as something else like {passcode}, it will not work
+  //this is the important linker between frontend and backend, so it has to match with frontend
+  //the other important linker is at res.json, where backend responds to frontend, and in frontend
+  // there has to be matching variables
 
   let user = {};
   if (password === "123") {
@@ -99,47 +107,98 @@ app.post("/authVer2", (req, res) => {
   }
 
   const token = jwt.sign(user, JWT_SECRET, { expiresIn: 100 });//sign the object and store it in 'token'
-  res.json({ token, user });//respond with 'token' and 'user'
+  res.json({ token, user });
+  //res.json is the DataStreamFromBackend
+  //"token" and "user" are the output linkers
+  //so in frontend, the variables must be named data.token and data.user
+  // in order to extract the values from the output linkers
 });
 
+//✅✅✅✅THIS IS WHERE USER IS VERIFIED AFTER THEY HAVE SIGNED IN, THE SECOND MOST IMPORTANT CHECKPOINT
 function authenticateTokenVer2(req, res, next) {//middleware to decrypt token
   const header = req.headers.authorization;//take authorization from headers from request
   if (!header) return res.status(401).json({ error: "No token" });//if it is null => error
 
   const token = header.split(" ")[1];//else, extract the 'token' in ""
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);//decrypt the 'token' with JWT_SECRET
-    req.user = decoded;//req.user will look like this { id: 42, name: 'alice', iat: 1758967261, exp: 1758967361 }
-      //jwt.verify doesn't care the name alice or bob, it only cares if it can decode the token, if can => valid token, if cannot => invalid
+    const decoded = jwt.verify(token, JWT_SECRET);//decrypt the 'token', using JWT_SECRET as a password
+    //"decoded" contains whatever was encoded, so "decoded" will look like this
+    //{ id: 42, name: 'alice', role: "user", iat: 1758967261, exp: 1758967361 }
+    //jwt.verify doesn't care if the name is alice or bob, it only cares if it can decode or not, if can => valid, if cannot => invalid
+    req.user = decoded;
+    //"user" is what you append to req, you can append anything, you can write `req.haha = 0`
+    //just make sure that in further processes after this middleware, you need to call req.haha to use it
+    //req is globally available, but req.haha is only available after this middleware
     next();
   } catch (err) {
     res.status(401).json({ error: "Invalid token" });
   }
 }
 
+//✅✅✅✅THIS IS WHERE USER IS VERIFIED IF THEY ARE ADMIN
 function checkIfAdmin(req, res, next) {//middleware to detect user role
   if (req.user.role !== "admin")
     return res.status(403).json({ error: "Admins only" });
   next();
 }
 
-//DEPENDING ON: authenticateTokenVer2, checkIfAdmin
-//this endpoint is for admin only
-app.get("/foradmin", authenticateTokenVer2, checkIfAdmin, (req, res) => {
-  console.log(req.ip)
+//request count, version 2
+let userRequestCount = {};
+//✅✅✅✅THIS IS WHERE USER REQUEST IS COUNTED
+function checkNumberOfRequests(req, res, next) {
+  const userId = req.user.id;
+  //to use user's ip, use this code ```const user = req.ip;```
+
+  if (!userRequestCount[userId]) {
+    userRequestCount[userId] = 0;
+  }//or this code ```userRequestCount[userId] = (userRequestCount[userId] || 0) + 1;```
+
+  userRequestCount[userId]++;
+  //res.send(`You have made ${userRequestCount[userId]} requests`);
+  if (userRequestCount[userId] > 5) {
+    return res.status(429).json({ error: "Too many requests" });
+    //when you write "return", it means user request only reaches this point, no further backend processes
+    //so if user requests, say > 5, backend will stop them right here, they have to return
+    // they can't enter the next checkpoint/endpoint
+    //you can write it like this res.json, without "return", but then there shouldn't be any res.json below it
+    // or it will cause the double response error
+  }
+  next();
+}
+
+
+
+
+//DEPENDING ON: authenticateTokenVer2, checkIfAdmin, checkNumberOfRequests
+//this is example endpoint for "admin only"
+app.get("/foradmin", authenticateTokenVer2, checkIfAdmin, checkNumberOfRequests, (req, res) => {
   res.json({ message: `Welcome, ${req.user.username}. This is admin-only.` });
 });
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Track request counts per user
 //this will keep count as long as backend won't restart
 //if backend restarts, this count will be lost, so if you want it to be permanent, you need to keep it in database
-//you can request the entire database and store it in a backend variable, but remember to push data back to database before updating your backend, because updating backend will reset the backend
+//you can request the entire database and store it in a backend variable
+// but remember to push data back to database before updating your backend, because updating backend will reset the backend
 const requestCount = {};//if you write requestCount = 0, then it can't distinguish between users, every request increments the same counter
 //CONST does not make the value immutable, it only means the binding (the variable name) cannot be reassigned
 
 //DEPENDING ON: auth
 app.get("/requestcount", authenticateTokenVer2, (req, res) => {
-  //after authenticateToken, now you have all the information of the user, like id name role, now you can check those information to grant them access to specific part of your web
+  //after authenticateToken, now you have all the information of the user
+  // like id name role, now you can check those information to grant them access to specific part of your web
   //all information of the user is stored in "req.user"
   //a user is determined by their id, not their name so you should use their id here
   const userId = req.user.id;//userId = 42
@@ -166,6 +225,18 @@ app.get("/requestcount", authenticateTokenVer2, (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 //DEPENDING ON (maybe): authenticateToken
 app.post('/calculate', authenticateToken, (req, res) => {
   const { expr } = req.body;
@@ -179,9 +250,6 @@ app.post('/calculate', authenticateToken, (req, res) => {
     res.json({ error: 'Invalid expression' });
   }
 });
-
-
-
 
 
 
@@ -273,7 +341,7 @@ app.post("/api/chat", async (req, res) => {
 
     // Create the messages array (system + user)
     const finalPrompt = [
-      { role: "system", content: "systemPrompt" },
+      { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ];
 
@@ -335,7 +403,7 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-5-nano", //gpt-5-nano, gpt-4o-mini,
+        model: "gpt-5-nano", //gpt-5-nano, gpt-4o-mini
         messages: [
           {
             role: "user",
@@ -366,7 +434,6 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
       console.log("No token usage info available.");
     }
     
-
     if (data.error) {
       return res.status(500).json({ error: data.error.message });
     }
