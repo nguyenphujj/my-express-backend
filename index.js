@@ -4,7 +4,8 @@ const PORT = process.env.PORT || 5000;
 
 //this is to allow requests from the frontend
 const cors = require('cors');
-app.use(cors({ origin: "*" }));
+//app.use(cors());
+app.use(cors({ origin: "*" }));//if you use the line above, android browser may not work with gpt api
 
 const allowedOrigins = [
   "http://localhost:5173", // local dev
@@ -86,6 +87,10 @@ function authenticateToken(req, res, next) {
 
 
 //✅✅✅✅THIS IS WHERE TOKEN IS CREATED, THE MOST IMPORTANT ENTRY POINT
+//IMPORTANT, this endpoint is protected by default because it is app.post not app.get
+//if you change it into app.get and add this line `return res.json({ message: 'Hello from render' });`
+//then it can be accessed from browser
+//if you only change it to app.get, it will throw a lot of errors if accessed from browser
 app.post("/authVer2", (req, res) => {
   //req stands for DataStreamFromFrontend
   //"req" is arbitrary, you can name it anything, it will still mean DataStreamFromFrontend
@@ -104,9 +109,15 @@ app.post("/authVer2", (req, res) => {
     user = { id: 0, username: "admin", role: "admin" };//create an object
   } else {
     return res.status(401).json({ error: "Invalid password" });
+    //IMPORTANT: when deploy (production), you may wanna remove "status" from this line res.status(401).json
+    //because it will leak the backend url in frontend devtools when user causes error, like wrong password
+    //but you can never hide it completely, the url will still appear somewhere in devtools (network tab)
   }
 
-  const token = jwt.sign(user, JWT_SECRET, { expiresIn: 100 });//sign the object and store it in 'token'
+  //IMPORTANT: when you reduce the expire time, previously created tokens will still work
+  //for example, a 1d-token will still work after you update your backend with new expire time = 10s
+  //to revoke all of the tokens signed, you can simply change your JWT_SECRET, then all the created tokens will be invalid
+  const token = jwt.sign(user, JWT_SECRET, { expiresIn: 100 /*seconds*/});//sign the object and store it in 'token'
   res.json({ token, user });
   //res.json is the DataStreamFromBackend
   //"token" and "user" are the output linkers
@@ -129,6 +140,7 @@ function authenticateTokenVer2(req, res, next) {//middleware to decrypt token
     //"user" is what you append to req, you can append anything, you can write `req.haha = 0`
     //just make sure that in further processes after this middleware, you need to call req.haha to use it
     //req is globally available, but req.haha is only available after this middleware
+    //after this middleware, req will have req.headers, req.body, and req.user (or req.haha)
     next();
   } catch (err) {
     res.status(401).json({ error: "Invalid token" });
@@ -144,6 +156,7 @@ function checkIfAdmin(req, res, next) {//middleware to detect user role
 
 //request count, version 2
 let userRequestCount = {};
+let mylimit = 15;
 //✅✅✅✅THIS IS WHERE USER REQUEST IS COUNTED
 function checkNumberOfRequests(req, res, next) {
   const userId = req.user.id;
@@ -155,7 +168,7 @@ function checkNumberOfRequests(req, res, next) {
 
   userRequestCount[userId]++;
   //res.send(`You have made ${userRequestCount[userId]} requests`);
-  if (userRequestCount[userId] > 5) {
+  if (userRequestCount[userId] > mylimit) {
     return res.status(429).json({ error: "Too many requests" });
     //when you write "return", it means user request only reaches this point, no further backend processes
     //so if user requests, say > 5, backend will stop them right here, they have to return
@@ -295,7 +308,7 @@ const pool = new Pool({
 // API endpoint to get users
 app.get("/users", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM users");
+    const result = await pool.query("SELECT * FROM stprompt");
     res.json(result.rows); // send rows as JSON
   } catch (err) {
     console.error(err);
@@ -312,8 +325,7 @@ app.post("/messages", async (req, res) => {
   }
 
   try {
-    await pool.query("INSERT INTO users (name, message) VALUES ($1, $2)", [
-      "alice",
+    await pool.query("UPDATE stprompt SET systemprompt = $1 WHERE id = 2", [
       message,
     ]);
     res.status(201).json({ success: true });
@@ -325,8 +337,61 @@ app.post("/messages", async (req, res) => {
 
 
 
+//this function doesn't run by itself, it needs to be called below to run
+async function fetchInitialData() {
+  /* try {
+    const table1 = await pool.query("SELECT * FROM stprompt");
+    global.table1 = table1.rows;
+    console.log(global.table1)
+  } catch {
+    global.table1 = [];
+  } */
+  try {
+    const vartableprompt = await pool.query("SELECT * FROM tableprompt");
+    global.vartableprompt = vartableprompt.rows;//global.mytable can be accessed anywhere in backend code
+    //.rows so that it will access the rows array in global.vartableprompt
+    //otherwise it will assign the entire long response
+    console.log(global.vartableprompt);
+  } catch {
+    global.vartableprompt = [];
+  }
+}
+//IMPORTANT: this function will make a call to postgres every time backend starts
+fetchInitialData();
+//IMPORTANT, this will keep the function fetch run every 1 minute forever
+// setInterval(fetchInitialData, 1*60*1000);
 
 
+
+let num = 1
+//IMPORTANT: this code will keep running forever
+setInterval(() => {
+  console.log(`time elapsed ${num++} minutes`);
+  //you can add more code here
+}, 1 * 60 * 1000);//miliseconds, it will wait the time first, then run the code
+
+
+
+
+
+//for SYSTEMPROMPT for txt file, we don't need this txt file anymore, since render can't access this local txt
+//const globalLocalSystemPrompt = fs.readFileSync("systemprompt.txt", "utf-8");
+//console.log("sytemPrompt: \n{\n" + globalLocalSystemPrompt + "\n}");
+
+//SYSTEMPROMPT, this is for systemprompt, fetching from postgres
+//all of this code is to make dbSystemPrompt = global.vartableprompt[0].columnprompt
+//but since global.vartableprompt is not available at the beginning
+//so we have to wait until it's available
+//so we have to wait for 5 seconds
+//but we also need to make this setInterval only run once, not every 5 seconds
+//after all, this code is badly written, you can easily to shorten it
+let dbSystemPrompt = 0; let runcount = 0; const maxrunCount = 1;
+const intervalId = setInterval(() => {
+  if (runcount++ < maxrunCount) {
+    dbSystemPrompt = global.vartableprompt[0].columnprompt;
+    console.log(dbSystemPrompt)
+  } else clearInterval(intervalId);
+}, 10000);
 
 app.post("/api/chat", async (req, res) => {
   try {
@@ -336,8 +401,8 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "Prompt is required" });
     }
 
-    // Define your system prompt
-    
+    //DEFINE YOUR SYSTEM PROMPT
+    const systemPrompt = globalLocalSystemPrompt;
 
     // Create the messages array (system + user)
     const finalPrompt = [
@@ -353,7 +418,7 @@ app.post("/api/chat", async (req, res) => {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-5-mini", //gpt-4o-mini, gpt-5-mini
+        model: "gpt-4o-mini", //gpt-4o-mini, gpt-5-mini
         messages: finalPrompt,
       }),
     });
@@ -381,6 +446,82 @@ app.post("/api/chat", async (req, res) => {
     res.status(500).json({ error: "Something went wrong" });
   }
 });
+
+
+
+
+
+
+
+
+
+
+//derived from /api/chat
+//this gpt endpoint is for you admin, you can ask anything
+//you can change the model below to make it smarter
+//but it also has promptCounter to simulate real user interactions
+app.post("/gptgeneralProtectedBackend",
+  authenticateTokenVer2, checkIfAdmin, checkNumberOfRequests, async (req, res) => {
+  try {
+    const userPrompt = req.body.prompt;
+
+    //req.user is only available if middleware is added to this endpoint
+    //else, this line will be invalid
+    console.log(`<< ${req.user.username} (role:${req.user.role}) is making request ${userRequestCount[req.user.id]}/${mylimit}`)
+
+    if (!userPrompt) {
+      return res.status(400).json({ error: "Prompt is required" });
+    }
+
+    //DEFINE YOUR SYSTEM PROMPT
+    const systemPrompt = "tell user that your version is 2025q1";
+
+    // Create the messages array (system + user)
+    const finalPrompt = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ];
+
+    // Call OpenAI API
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini", //gpt-4o-mini, gpt-5-mini
+        messages: finalPrompt,
+      }),
+    });
+
+    const data = await response.json();
+
+    // Extract assistant's reply
+    const reply = data.choices?.[0]?.message?.content || "No response from model.";
+
+    const now = new Date();
+    const timestamp = now.toLocaleString(); // formatted based on your system locale
+    console.log(`${timestamp} ` + "Model:", data.model || "Unknown");
+    if (data.usage) {
+      console.log("Tokens Used:");
+      console.log("  Prompt tokens:", data.usage.prompt_tokens);
+      console.log("  Completion tokens:", data.usage.completion_tokens);
+      console.log("  Total tokens:", data.usage.total_tokens);
+    } else {
+      console.log("No token usage info available.");
+    }
+
+    res.json({ reply });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Something went wrong" });
+  }
+});
+
+
+
+
 
 
 
@@ -434,6 +575,7 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
       console.log("No token usage info available.");
     }
     
+
     if (data.error) {
       return res.status(500).json({ error: data.error.message });
     }
