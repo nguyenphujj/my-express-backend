@@ -337,6 +337,35 @@ app.post("/messages", async (req, res) => {
 
 
 
+
+
+
+//derived from /messages
+app.post("/admin-update-systemprompt", async (req, res) => {
+  const { message } = req.body;
+
+  if (!message) return res.status(400).json({ error: "Message is required" });
+
+  try {
+    await pool.query(
+      'UPDATE tableprompt SET columnsubject = $1, columnprompt = $2 WHERE id = $3',
+      ['math', message, 1]
+    );
+    res.status(201).json({ success: true });
+  } catch (err) {
+    console.error("DB insert error:", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+//to update one cell only, use this code, remember to check id
+// await pool.query("UPDATE stprompt SET systemprompt = $1 WHERE id = 2", [message,]);
+
+
+
+
+
+
 //this function doesn't run by itself, it needs to be called below to run
 async function fetchInitialData() {
   /* try {
@@ -389,9 +418,10 @@ let dbSystemPrompt = 0; let runcount = 0; const maxrunCount = 1;
 const intervalId = setInterval(() => {
   if (runcount++ < maxrunCount) {
     dbSystemPrompt = global.vartableprompt[0].columnprompt;
-    console.log(dbSystemPrompt)
+    console.log(`dbSystemPrompt=========================\n${dbSystemPrompt}\n=======================================`)
   } else clearInterval(intervalId);
-}, 10000);
+}, 5000);
+//you should wait for this console.log to run before making any gpt request
 
 app.post("/api/chat", async (req, res) => {
   try {
@@ -402,7 +432,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     //DEFINE YOUR SYSTEM PROMPT
-    const systemPrompt = globalLocalSystemPrompt;
+    const systemPrompt = 'globalLocalSystemPrompt';
 
     // Create the messages array (system + user)
     const finalPrompt = [
@@ -596,10 +626,10 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
 
 
 
-
+const systemPrompt = process.env.SYSTEMPROMPT;
 
 app.get('/', (req, res) => {
-res.json({ message: 'Hello from render' });
+res.json({ message: `The system prompt is: ${systemPrompt}` });
 });
 
 app.listen(PORT, () => {
