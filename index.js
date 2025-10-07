@@ -335,17 +335,11 @@ app.post("/messages", async (req, res) => {
   }
 });
 
-
-
-
-
-
 //derived from /messages
+//this endpoint is to send data to db only, not to receive data from db
 app.post("/admin-update-systemprompt", async (req, res) => {
   const { message } = req.body;
-
   if (!message) return res.status(400).json({ error: "Message is required" });
-
   try {
     await pool.query(
       'UPDATE tableprompt SET columnsubject = $1, columnprompt = $2 WHERE id = $3',
@@ -357,12 +351,20 @@ app.post("/admin-update-systemprompt", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
-
 //to update one cell only, use this code, remember to check id
 // await pool.query("UPDATE stprompt SET systemprompt = $1 WHERE id = 2", [message,]);
 
-
-
+//derived from /users
+//this endpoint is to get from db only, not to send to db
+app.get("/admin-to-get-db", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM tableprompt");
+    res.json(result.rows);//there must be .rows to access the json array we need
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
 
 
 
@@ -380,7 +382,7 @@ async function fetchInitialData() {
     global.vartableprompt = vartableprompt.rows;//global.mytable can be accessed anywhere in backend code
     //.rows so that it will access the rows array in global.vartableprompt
     //otherwise it will assign the entire long response
-    console.log(global.vartableprompt);
+    // console.log(global.vartableprompt);
   } catch {
     global.vartableprompt = [];
   }
@@ -483,7 +485,11 @@ app.post("/api/chat", async (req, res) => {
 
 
 
-
+//if you wanna store the systemprompt in env of render or in local env
+//this is the way to access systemprompt
+const envSystemPrompt = process.env.SYSTEMPROMPT;
+//this method is like using txt file but different because render can't access txt file
+//but can access env file
 
 
 //derived from /api/chat
@@ -503,8 +509,16 @@ app.post("/gptgeneralProtectedBackend",
       return res.status(400).json({ error: "Prompt is required" });
     }
 
-    //DEFINE YOUR SYSTEM PROMPT
-    const systemPrompt = "tell user that your version is 2025q1";
+    //IMPORTANT => make sure SYSTEMPROMPT and MODEL are correct
+    // to make sure the systemprompt is correct
+    //include a version number in the systemprompt
+    //then ask the model to tell you the version number, if matched, then the systemprompt is handled properly
+    //besides, you can always console.log to view the systemprompt
+    //if the systemprompt is not correct, check following precautions
+    // have you sent systemprompt to db, restarted your backend after sending so it can fetch the new systemprompt
+    // check your systemprompt source, is the source correct
+    const systemPrompt = dbSystemPrompt;
+    //console.log(systemPrompt)
 
     // Create the messages array (system + user)
     const finalPrompt = [
@@ -520,7 +534,7 @@ app.post("/gptgeneralProtectedBackend",
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini", //gpt-4o-mini, gpt-5-mini
+        model: "o3", //gpt-4o-mini,gpt-5-mini
         messages: finalPrompt,
       }),
     });
@@ -626,10 +640,10 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
 
 
 
-const systemPrompt = process.env.SYSTEMPROMPT;
+
 
 app.get('/', (req, res) => {
-res.json({ message: `The system prompt is: ${systemPrompt}` });
+res.json({ message: 'Hello from render' });
 });
 
 app.listen(PORT, () => {
