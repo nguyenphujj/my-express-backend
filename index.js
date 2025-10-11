@@ -300,9 +300,8 @@ const { Pool } = require('pg');
 
 // Create PostgreSQL connection pool
 const pool = new Pool({
-  connectionString:
-    "postgresql://my_pg_database_ie9q_user:bjyDS6jux3aSCDRQG8GQLVJGXlBPABBI@dpg-d33dk37diees739fs7qg-a.singapore-postgres.render.com/my_pg_database_ie9q",
-  ssl: { rejectUnauthorized: false }, // Render requires SSL
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: true }, // Render requires SSL
 });
 
 // API endpoint to get users
@@ -416,13 +415,15 @@ setInterval(() => {
 //so we have to wait for 5 seconds
 //but we also need to make this setInterval only run once, not every 5 seconds
 //after all, this code is badly written, you can easily to shorten it
+//TIPS, put dbSystemPrompt inside "try" together with globalvariable
 let dbSystemPrompt = 0; let runcount = 0; const maxrunCount = 1;
 const intervalId = setInterval(() => {
   if (runcount++ < maxrunCount) {
-    dbSystemPrompt = global.vartableprompt[0].columnprompt;
+    dbSystemPrompt = global.vartableprompt[0]?.columnprompt || "state that your name is Empty before answering";
+    //IMPORTANT, question mark and OR is for in case you forget to push systemprompt to db, otherwise backend will throw error
     console.log(`dbSystemPrompt=========================\n${dbSystemPrompt}\n=======================================`)
   } else clearInterval(intervalId);
-}, 5000);
+}, 5_000);
 //you should wait for this console.log to run before making any gpt request
 
 app.post("/api/chat", async (req, res) => {
@@ -492,6 +493,8 @@ const envSystemPrompt = process.env.SYSTEMPROMPT;
 //but can access env file
 
 
+/* //NON-STREAMING VERSION, IF YOU WANNA USE THIS ENDPOINT, PLEASE DISABLE THE STREAMING VERSION
+MAKE SURE IT GOES WITH THE NON-STREAMING VERSION IN FRONTEND TOO
 //derived from /api/chat
 //this gpt endpoint is for you admin, you can ask anything
 //you can change the model below to make it smarter
@@ -518,7 +521,7 @@ app.post("/gptgeneralProtectedBackend",
     // have you sent systemprompt to db, restarted your backend after sending so it can fetch the new systemprompt
     // check your systemprompt source, is the source correct
     const systemPrompt = dbSystemPrompt;
-    //console.log(systemPrompt)
+    console.log(systemPrompt)
 
     // Create the messages array (system + user)
     const finalPrompt = [
@@ -534,7 +537,7 @@ app.post("/gptgeneralProtectedBackend",
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "o3", //gpt-4o-mini,gpt-5-mini
+        model: "gpt-4o-mini", //gpt-4o-mini, gpt-5-mini
         messages: finalPrompt,
       }),
     });
@@ -561,7 +564,93 @@ app.post("/gptgeneralProtectedBackend",
     console.error(error);
     res.status(500).json({ error: "Something went wrong" });
   }
-});
+}); */
+
+//THE STREAMING VERSION, the purpose of this is to prevent waiting timeout due to long response
+//MAKE SURE IT GOES WITH THE STREAMING VERSION IN FRONTEND, AND DISABLE THE NON-STREAMING IN BACKEND TOO
+app.post(
+  "/gptgeneralProtectedBackend",
+  authenticateTokenVer2,
+  checkIfAdmin,
+  checkNumberOfRequests,
+  async (req, res) => {
+    try {
+      const userPrompt = req.body.prompt;
+      if (!userPrompt) {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+      await pool.query('INSERT INTO tableChat (columnSender, columnContent) VALUES ($1, $2)',
+        ['user', userPrompt]);
+
+      const systemPrompt = dbSystemPrompt;
+      console.log(dbSystemPrompt);
+      const finalPrompt = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ];
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",//MODEL IS HEREEEEEEEEEEEEEEEEEEEEEEEE
+          messages: finalPrompt,
+          stream: true, // <-- IMPORTANT
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        console.error("OpenAI error:", text);
+        return res.status(500).end("Error from OpenAI");
+      }
+
+      let fullResponse = ""; // 👈 to store the full completion text
+
+      const decoder = new TextDecoder();
+      for await (const chunk of response.body) {
+        const decoded = decoder.decode(chunk, { stream: true });
+        const lines = decoded.split("\n").filter(line => line.trim() !== "");
+
+        for (const line of lines) {
+          if (line.startsWith("data:")) {
+            const data = line.replace(/^data:\s*/, "");
+            if (data === "[DONE]") {
+              res.write("event: done\ndata: [DONE]\n\n");
+              console.log("<>", /* fullResponse */);//these console.log to demo when backend starts query and when finishes
+              await pool.query('INSERT INTO tableChat (columnSender, columnContent) VALUES ($1, $2)',
+                ['api', fullResponse]);
+              console.log("<>");
+              return res.end();
+            }
+
+            try {
+              const json = JSON.parse(data);
+              const token = json.choices?.[0]?.delta?.content;
+              if (token) {
+                // Send token to client
+                fullResponse += token;
+                res.write(`data: ${JSON.stringify({ token })}\n\n`);
+              }
+            } catch (err) {
+              console.error("Stream JSON parse error:", err);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Backend streaming error:", error);
+      res.status(500).end("Something went wrong.");
+    }
+  }
+);
 
 
 
