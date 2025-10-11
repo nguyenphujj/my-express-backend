@@ -593,6 +593,11 @@ app.post(
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
       res.flushHeaders(); // important
+
+      // --- ADD THIS: keep-alive ping ---
+      const keepAlive = setInterval(() => {
+        res.write(":keep-alive\n\n");
+      }, 1000);
       
 
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -625,6 +630,7 @@ app.post(
           if (line.startsWith("data:")) {
             const data = line.replace(/^data:\s*/, "");
             if (data === "[DONE]") {
+              clearInterval(keepAlive); // <--- clear keep-alive
               res.write("event: done\ndata: [DONE]\n\n");
               console.log("<>", /* fullResponse */);//these console.log to demo when backend starts query and when finishes
               await pool.query('INSERT INTO tableChat (columnSender, columnContent) VALUES ($1, $2)',
@@ -647,6 +653,7 @@ app.post(
           }
         }
       }
+      clearInterval(keepAlive); // <--- clear keep-alive if loop ends
     } catch (error) {
       console.error("Backend streaming error:", error);
       res.status(500).end("Something went wrong.");
