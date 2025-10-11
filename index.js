@@ -36,142 +36,10 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 
 
-const http = require('http');
-const WebSocket = require('ws');
-const { URL } = require('url');
-app.get('/health', (req, res) => res.json({ ok: true }));
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server, path: "/ws" });
 
 
-// helper: call OpenAI streaming chat completions..
-async function streamChatCompletions(messages, model = 'gpt-4o-mini', ws) {
-  // Choose the endpoint your organization uses. This example calls the classic chat completions endpoint
-  const url = 'https://api.openai.com/v1/chat/completions';
 
-  const body = {
-    model,
-    messages,
-    stream: true,
-  };
 
-  // node-fetch v2 returns a body stream we can read from
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    ws.send(JSON.stringify({ type: 'error', message: `OpenAI error: ${res.status} ${text}` }));
-    return;
-  }
-
-  // The streaming response is text/event-stream style with lines like: "data: {...}\n\n"
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    // process any full events (separated by double newline)
-    let parts = buffer.split(/\r?\n\r?\n/);
-    // leave last partial chunk in buffer
-    buffer = parts.pop();
-
-    for (const part of parts) {
-      // each part may contain multiple lines like:
-      // data: {...}
-      // data: {...}
-      // or data: [DONE]
-      const lines = part.split(/\r?\n/);
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        if (!trimmed.startsWith('data:')) continue;
-        const payload = trimmed.replace(/^data:\s*/, '');
-
-        if (payload === '[DONE]') {
-          ws.send(JSON.stringify({ type: 'done' }));
-          return;
-        }
-
-        let parsed;
-        try {
-          parsed = JSON.parse(payload);
-        } catch (err) {
-          // ignore non-json or forward raw
-          ws.send(JSON.stringify({ type: 'error', message: 'could not parse chunk', raw: payload }));
-          continue;
-        }
-
-        // defensive: check shape
-        try {
-          const choices = parsed.choices || [];
-          if (choices.length > 0) {
-            const delta = choices[0].delta || {};
-            // Chat-style streaming may send {delta: {content: "hi"}}
-            // For older endpoints sometimes it's choices[0].text
-            const content = delta.content ?? choices[0].text ?? '';
-            if (content) {
-              ws.send(JSON.stringify({ type: 'delta', content }));
-            }
-          }
-        } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'error extracting delta', detail: String(err) }));
-        }
-      }
-    }
-  }
-
-  // if we exit loop without [DONE], send done
-  ws.send(JSON.stringify({ type: 'done' }));
-}
-// WebSocket connections
-wss.on('connection', (ws, req) => {
-  console.log('Client connected');
-
-  ws.on('message', async (message) => {
-    // Expect a JSON message from client
-    let parsed;
-    try {
-      parsed = JSON.parse(message);
-    } catch (err) {
-      ws.send(JSON.stringify({ type: 'error', message: 'invalid json' }));
-      return;
-    }
-
-    if (parsed.type === 'start') {
-      const { messages, model } = parsed;
-      if (!messages || !Array.isArray(messages)) {
-        ws.send(JSON.stringify({ type: 'error', message: 'missing messages array' }));
-        return;
-      }
-
-      try {
-        await streamChatCompletions(messages, model || 'gpt-4o-mini', ws);
-      } catch (err) {
-        console.error('stream error', err);
-        ws.send(JSON.stringify({ type: 'error', message: 'streaming failed', detail: String(err) }));
-      }
-    } else if (parsed.type === 'ping') {
-      ws.send(JSON.stringify({ type: 'pong' }));
-    } else {
-      ws.send(JSON.stringify({ type: 'error', message: 'unknown message type' }));
-    }
-  });
-
-  ws.on('close', () => {
-    console.log('Client disconnected');
-  });
-});
 
 
 
@@ -790,6 +658,154 @@ app.post(
 
 
 
+//ALL OF THIS IS FOR WEBSOCKET
+//this is to solve the "unable to stream" issue on android
+//  which the "streaming version" endpoint can't solve
+//this has a dedicated component in frontend
+//and this has to go with that component, in order to make everything work
+const http = require('http');
+const WebSocket = require('ws');
+const { URL } = require('url');
+app.get('/health', (req, res) => res.json({ ok: true }));
+const server = http.createServer(app);
+// const wss = new WebSocket.Server({ server });  //old version
+const wss = new WebSocket.Server({ server, path: "/ws" });  //modified
+
+// helper: call OpenAI streaming chat completions
+async function streamChatCompletions(messages, model = 'gpt-4o-mini', ws) {
+  // Choose the endpoint your organization uses. This example calls the classic chat completions endpoint
+  const url = 'https://api.openai.com/v1/chat/completions';
+
+  const body = {
+    model,
+    messages,
+    stream: true,
+  };
+
+  // node-fetch v2 returns a body stream we can read from
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    ws.send(JSON.stringify({ type: 'error', message: `OpenAI error: ${res.status} ${text}` }));
+    return;
+  }
+
+  // The streaming response is text/event-stream style with lines like: "data: {...}\n\n"
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // process any full events (separated by double newline)
+    let parts = buffer.split(/\r?\n\r?\n/);
+    // leave last partial chunk in buffer
+    buffer = parts.pop();
+
+    for (const part of parts) {
+      // each part may contain multiple lines like:
+      // data: {...}
+      // data: {...}
+      // or data: [DONE]
+      const lines = part.split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (!trimmed.startsWith('data:')) continue;
+        const payload = trimmed.replace(/^data:\s*/, '');
+
+        if (payload === '[DONE]') {
+          ws.send(JSON.stringify({ type: 'done' }));
+          return;
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(payload);
+        } catch (err) {
+          // ignore non-json or forward raw
+          ws.send(JSON.stringify({ type: 'error', message: 'could not parse chunk', raw: payload }));
+          continue;
+        }
+
+        // defensive: check shape
+        try {
+          const choices = parsed.choices || [];
+          if (choices.length > 0) {
+            const delta = choices[0].delta || {};
+            // Chat-style streaming may send {delta: {content: "hi"}}
+            // For older endpoints sometimes it's choices[0].text
+            const content = delta.content ?? choices[0].text ?? '';
+            if (content) {
+              ws.send(JSON.stringify({ type: 'delta', content }));
+            }
+          }
+        } catch (err) {
+          ws.send(JSON.stringify({ type: 'error', message: 'error extracting delta', detail: String(err) }));
+        }
+      }
+    }
+  }
+
+  // if we exit loop without [DONE], send done
+  ws.send(JSON.stringify({ type: 'done' }));
+}
+// WebSocket connections
+wss.on('connection', (ws, req) => {
+  console.log('Client connected');
+
+  ws.on('message', async (message) => {
+    // Expect a JSON message from client
+    let parsed;
+    try {
+      parsed = JSON.parse(message);
+    } catch (err) {
+      ws.send(JSON.stringify({ type: 'error', message: 'invalid json' }));
+      return;
+    }
+
+    if (parsed.type === 'start') {
+      const { messages, model } = parsed;
+      if (!messages || !Array.isArray(messages)) {
+        ws.send(JSON.stringify({ type: 'error', message: 'missing messages array' }));
+        return;
+      }
+
+      try {
+        await streamChatCompletions(messages, model || 'gpt-4o-mini', ws);
+      } catch (err) {
+        console.error('stream error', err);
+        ws.send(JSON.stringify({ type: 'error', message: 'streaming failed', detail: String(err) }));
+      }
+    } else if (parsed.type === 'ping') {
+      ws.send(JSON.stringify({ type: 'pong' }));
+    } else {
+      ws.send(JSON.stringify({ type: 'error', message: 'unknown message type' }));
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('Client disconnected');
+  });
+});
+
+
+
+
+
+
+
 
 
 
@@ -867,6 +883,7 @@ app.get('/', (req, res) => {
 res.json({ message: 'Hello from render' });
 });
 
+//modified: old version is app.listen
 server.listen(PORT, () => {
   const now = new Date();
   const timestamp = now.toLocaleString();
