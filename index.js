@@ -44,7 +44,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 
-// helper: call OpenAI streaming chat completions
+// helper: call OpenAI streaming chat completions.
 async function streamChatCompletions(messages, model = 'gpt-4o-mini', ws) {
   // Choose the endpoint your organization uses. This example calls the classic chat completions endpoint
   const url = 'https://api.openai.com/v1/chat/completions';
