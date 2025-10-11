@@ -301,7 +301,7 @@ const { Pool } = require('pg');
 // Create PostgreSQL connection pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: true }, // Render requires SSL
+  ssl: { rejectUnauthorized: false }, // Render requires SSL
 });
 
 // API endpoint to get users
@@ -488,7 +488,7 @@ app.post("/api/chat", async (req, res) => {
 
 //if you wanna store the systemprompt in env of render or in local env
 //this is the way to access systemprompt
-const envSystemPrompt = process.env.SYSTEMPROMPT;
+// const envSystemPrompt = process.env.SYSTEMPROMPT;
 //this method is like using txt file but different because render can't access txt file
 //but can access env file
 
@@ -592,6 +592,8 @@ app.post(
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
+      res.flushHeaders(); // important
+      res.setHeader('Transfer-Encoding', 'chunked');
 
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
