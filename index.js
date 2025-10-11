@@ -593,7 +593,7 @@ app.post(
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
       res.flushHeaders(); // important
-      res.setHeader('Transfer-Encoding', 'chunked');
+      
 
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
