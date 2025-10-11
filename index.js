@@ -597,7 +597,7 @@ app.post(
       // --- ADD THIS: keep-alive ping ---
       const keepAlive = setInterval(() => {
         res.write(":keep-alive\n\n");
-      }, 1000);
+      }, 300);
       
 
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
