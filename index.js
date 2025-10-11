@@ -41,10 +41,10 @@ const WebSocket = require('ws');
 const { URL } = require('url');
 app.get('/health', (req, res) => res.json({ ok: true }));
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ server, path: "/ws" });
 
 
-// helper: call OpenAI streaming chat completions.
+// helper: call OpenAI streaming chat completions..
 async function streamChatCompletions(messages, model = 'gpt-4o-mini', ws) {
   // Choose the endpoint your organization uses. This example calls the classic chat completions endpoint
   const url = 'https://api.openai.com/v1/chat/completions';
