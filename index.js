@@ -117,7 +117,7 @@ app.post("/authVer2", (req, res) => {
   //IMPORTANT: when you reduce the expire time, previously created tokens will still work
   //for example, a 1d-token will still work after you update your backend with new expire time = 10s
   //to revoke all of the tokens signed, you can simply change your JWT_SECRET, then all the created tokens will be invalid
-  const token = jwt.sign(user, JWT_SECRET, { expiresIn: 100 /*seconds*/});//sign the object and store it in 'token'
+  const token = jwt.sign(user, JWT_SECRET, { expiresIn: 10000 /*seconds*/});//sign the object and store it in 'token'
   res.json({ token, user });
   //res.json is the DataStreamFromBackend
   //"token" and "user" are the output linkers
@@ -672,10 +672,10 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: "/ws" });  //modified
 
 // helper: call OpenAI streaming chat completions
-async function streamChatCompletions(userinput, modelfromfrontend /* = 'gpt-4o-mini' */, ws) {
+async function streamChatCompletions(userinput, modelfromfrontend /* = 'gpt-4o-mini' */, tokenfromfrontend, ws) {
   await pool.query(
-    "INSERT INTO tableChat2 (colUserID, colSender, colMessage) VALUES ('admin321', 'user', $1)",
-    [userinput]);
+    "INSERT INTO tableChat2 (colUserID, colSender, colMessage) VALUES ($1, 'user', $2)",
+    [tokenfromfrontend, 'userinput']);
 
   const finalPrompt = [
     { role: "system", content: 'introduce that you are 3x01 before answering anything' },
@@ -734,7 +734,9 @@ async function streamChatCompletions(userinput, modelfromfrontend /* = 'gpt-4o-m
 
         if (payload === '[DONE]') {
           ws.send(JSON.stringify({ type: 'done' }));
-          console.log(completeResponse)
+          await pool.query(
+            "INSERT INTO tableChat2 (colUserID, colSender, colMessage) VALUES ($1, 'bot', $2)",
+            [tokenfromfrontend, 'completeResponse']);
           return;
         }
 
@@ -773,7 +775,17 @@ async function streamChatCompletions(userinput, modelfromfrontend /* = 'gpt-4o-m
 // WebSocket connections
 wss.on('connection', (ws, req) => {
   const token = req.url.split("token=")[1];
-  console.log(token);
+  console.log(`Client connected: ${token}`);
+
+  try {//even if user tries to edit localtoken, they still can only reach here, not any further
+    //only when user reaches the "decoded" below, they are actually signed in
+    const decoded = jwt.verify(token, JWT_SECRET);
+    ws.user = decoded;
+    console.log("User connected:", decoded);
+  } catch (err) {
+    ws.close(4001, "Invalid token");
+    return;
+  }
 
   ws.on('message', async (payloadfromfrontend) => {//THIS IS where it receives payload sent from frontend, like req
     // Expect a JSON message from client
@@ -793,7 +805,7 @@ wss.on('connection', (ws, req) => {
       }
 
       try {
-        await streamChatCompletions(messages, model /* || 'gpt-4o-mini' */, ws);
+        await streamChatCompletions(messages, model /* || 'gpt-4o-mini' */, token, ws);
       } catch (err) {
         console.error('stream error', err);
         ws.send(JSON.stringify({ type: 'error', message: 'streaming failed', detail: String(err) }));
