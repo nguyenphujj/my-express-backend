@@ -106,7 +106,7 @@ app.post("/authVer2", (req, res) => {
   if (password === "123") {
     user = { id: 42, username: "alice", role: "user" };//create an object
   } else if (password === "321") {
-    user = { id: 0, username: "admin", role: "admin" };//create an object
+    user = { id: 1, username: "admin", role: "admin" };//create an object
   } else {
     return res.status(401).json({ error: "Invalid password" });
     //IMPORTANT: when deploy (production), you may wanna remove "status" from this line res.status(401).json
@@ -671,6 +671,78 @@ const server = http.createServer(app);
 // const wss = new WebSocket.Server({ server });  //old version
 const wss = new WebSocket.Server({ server, path: "/ws" });  //modified
 
+
+
+
+
+// ---- Simulated Middleware System ----
+const applyMiddlewares = async (ws, req, middlewares) => {
+  for (const mw of middlewares) {
+    const result = await mw(ws, req);
+    if (!result.success) {
+      ws.send(JSON.stringify({ error: result.message }));
+      ws.close();
+      return false;
+    }
+  }
+  return true;
+};
+// 1️⃣ Authentication Middleware
+const authMiddleware = async (ws, req) => {
+  try {
+    const token = req.url.split("token=")[1];
+    console.log("HERE " + token)
+
+    if (!token) {
+      return { success: false, message: "Missing token" };
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    ws.user = decoded;
+    console.log("HERE 2 ")
+    console.log(decoded)
+    return { success: true };
+  } catch (err) {
+    return { success: false, message: "Invalid or expired token" };
+  }
+};
+
+// 2️⃣ Admin Check Middleware
+const adminMiddleware = async (ws, req) => {
+  if (!ws.user?.isAdmin) {
+    return { success: false, message: "Admin access required" };
+  }
+  return { success: true };
+};
+
+// 3️⃣ Request Count Middleware (Rate Limiting)
+const reqCount = {}; // userId -> count
+
+const requestCountMiddleware = async (ws, req) => {
+  console.log("HERE 3")
+  const userId = ws.user?.id;
+  console.log(userId)
+  if (!userId) return { success: false, message: "User not authenticated" };
+  console.log("HERE 3a")
+
+  if (!reqCount[userId]) reqCount[userId] = 0
+  const count = reqCount[userId];
+  console.log("HERE 4:::" + count)
+  if (count >= 3) {
+    console.log("Request limit reached")
+    return { success: false, message: "Request limit reached" };
+  }
+  
+  console.log("HERE 5 " + reqCount[userId])
+
+  return { success: true };
+};
+
+
+
+
+
+
 // helper: call OpenAI streaming chat completions
 async function streamChatCompletions(userinput, modelfromfrontend /* = 'gpt-4o-mini' */, tokenfromfrontend, ws) {
   await pool.query(
@@ -773,11 +845,11 @@ async function streamChatCompletions(userinput, modelfromfrontend /* = 'gpt-4o-m
   ws.send(JSON.stringify({ type: 'done' }));
 }
 // WebSocket connections
-wss.on('connection', (ws, req) => {
+wss.on('connection', async (ws, req) => {
   const token = req.url.split("token=")[1];
   console.log(`Client connected: ${token}`);
 
-  try {//even if user tries to edit localtoken, they still can only reach here, not any further
+  /* try {//even if user tries to edit localtoken, they still can only reach here, not any further
     //only when user reaches the "decoded" below, they are actually signed in
     const decoded = jwt.verify(token, JWT_SECRET);
     ws.user = decoded;
@@ -785,7 +857,23 @@ wss.on('connection', (ws, req) => {
   } catch (err) {
     ws.close(4001, "Invalid token");
     return;
+  } */
+
+  const middlewares = [authMiddleware, requestCountMiddleware];
+
+  // If connecting to admin route, add admin middleware
+  if (req.url.startsWith("/admin")) {
+    middlewares.push(adminMiddleware);
   }
+
+  const ok = await applyMiddlewares(ws, req, middlewares);
+  if (!ok) return; // closed already if failed
+
+  // ✅ Connection accepted
+  ws.send(JSON.stringify({ message: "WebSocket connection established" }));
+
+  console.log(ws.user.id)
+  console.log("HERE 6 " + reqCount[ws.user.id])
 
   ws.on('message', async (payloadfromfrontend) => {//THIS IS where it receives payload sent from frontend, like req
     // Expect a JSON message from client
@@ -805,7 +893,16 @@ wss.on('connection', (ws, req) => {
       }
 
       try {
-        await streamChatCompletions(messages, model /* || 'gpt-4o-mini' */, token, ws);
+        const isNotReachLimit = (await requestCountMiddleware(ws, req)).success
+        if (isNotReachLimit) {
+          await streamChatCompletions(messages, model /* || 'gpt-4o-mini' */, token, ws);
+          console.log("HERE 7:::" + ++reqCount[ws.user.id])
+        }
+        else {
+          console.log("HERE 8 limit reached");
+          ws.send(JSON.stringify({ type: 'done' }));
+          return
+        }
       } catch (err) {
         console.error('stream error', err);
         ws.send(JSON.stringify({ type: 'error', message: 'streaming failed', detail: String(err) }));
