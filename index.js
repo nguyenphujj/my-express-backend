@@ -672,18 +672,24 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: "/ws" });  //modified
 
 // helper: call OpenAI streaming chat completions
-async function streamChatCompletions(messages, model = 'gpt-4o-mini', ws) {
-  // Choose the endpoint your organization uses. This example calls the classic chat completions endpoint
-  const url = 'https://api.openai.com/v1/chat/completions';
+async function streamChatCompletions(userinput, modelfromfrontend /* = 'gpt-4o-mini' */, ws) {
+  await pool.query(
+    "INSERT INTO tableChat2 (colUserID, colSender, colMessage) VALUES ('admin321', 'user', $1)",
+    [userinput]);
+
+  const finalPrompt = [
+    { role: "system", content: 'introduce that you are 3x01 before answering anything' },
+    { role: "user", content: userinput },
+  ];
 
   const body = {
-    model,
-    messages,
+    model: modelfromfrontend,//IMPORTANT, in this websocket code, the model option is decided in frontend, not backend
+    messages: finalPrompt,
     stream: true,
   };
 
   // node-fetch v2 returns a body stream we can read from
-  const res = await fetch(url, {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${OPENAI_API_KEY}`,
@@ -702,6 +708,7 @@ async function streamChatCompletions(messages, model = 'gpt-4o-mini', ws) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
+  let completeResponse = ''; //modified, variable to store complete response
 
   while (true) {
     const { value, done } = await reader.read();
@@ -727,6 +734,7 @@ async function streamChatCompletions(messages, model = 'gpt-4o-mini', ws) {
 
         if (payload === '[DONE]') {
           ws.send(JSON.stringify({ type: 'done' }));
+          console.log(completeResponse)
           return;
         }
 
@@ -749,6 +757,7 @@ async function streamChatCompletions(messages, model = 'gpt-4o-mini', ws) {
             const content = delta.content ?? choices[0].text ?? '';
             if (content) {
               ws.send(JSON.stringify({ type: 'delta', content }));
+              completeResponse += content; // Accumulate the response content
             }
           }
         } catch (err) {
@@ -763,13 +772,14 @@ async function streamChatCompletions(messages, model = 'gpt-4o-mini', ws) {
 }
 // WebSocket connections
 wss.on('connection', (ws, req) => {
-  console.log('Client connected');
+  const token = req.url.split("token=")[1];
+  console.log(token);
 
-  ws.on('message', async (message) => {
+  ws.on('message', async (payloadfromfrontend) => {//THIS IS where it receives payload sent from frontend, like req
     // Expect a JSON message from client
     let parsed;
     try {
-      parsed = JSON.parse(message);
+      parsed = JSON.parse(payloadfromfrontend);
     } catch (err) {
       ws.send(JSON.stringify({ type: 'error', message: 'invalid json' }));
       return;
@@ -777,13 +787,13 @@ wss.on('connection', (ws, req) => {
 
     if (parsed.type === 'start') {
       const { messages, model } = parsed;
-      if (!messages || !Array.isArray(messages)) {
+      if (!messages /* || !Array.isArray(messages) */) {
         ws.send(JSON.stringify({ type: 'error', message: 'missing messages array' }));
         return;
       }
 
       try {
-        await streamChatCompletions(messages, model || 'gpt-4o-mini', ws);
+        await streamChatCompletions(messages, model /* || 'gpt-4o-mini' */, ws);
       } catch (err) {
         console.error('stream error', err);
         ws.send(JSON.stringify({ type: 'error', message: 'streaming failed', detail: String(err) }));
