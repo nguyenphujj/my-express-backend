@@ -749,7 +749,7 @@ app.post(
       if (!reqCount[userId]) reqCount[userId] = 0
       const count = reqCount[userId];
       
-      if (count >= 3) return { success: false, message: "Request limit reached" };
+      if (count >= 13) return { success: false, message: "Request limit reached" };
 
       return { success: true };
     };
