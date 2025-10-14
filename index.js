@@ -190,7 +190,38 @@ app.get("/foradmin", authenticateTokenVer2, checkIfAdmin, checkNumberOfRequests,
 
 
 
+//THIS IS AUTHVER3
+//it features username and password
+  const userArray = [
+    { id: 1, username: "admin", password: "321", role: "admin" },
+    { id: 41, username: "alice", password: "123", role: "user" },
+    { id: 42, username: "bob", password: "456", role: "user" },
+    { id: 43, username: "carl", password: "789", role: "user" },
+  ];
+  app.post("/authVer3", (req, res) => {
+    const { username, password } = req.body;
+    const usernameinput = username
+    const passwordinput = password
+    //frontend must send "usernameinput" and "passwordinput"
 
+    const myuser = userArray.find(u => u.username === usernameinput);//this loops u.username
+    //and stores the whole user into myuser
+
+    if (!myuser || myuser.password !== passwordinput) {
+      return res.status(401).json({ message: "Invalid username or password" });
+    }
+
+    const payload = {
+      id: myuser.id,
+      username: myuser.username,
+      role: myuser.role
+    };
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "1h" });
+
+    const user = payload
+    res.json({ user, token });
+  });
+//
 
 
 
