@@ -46,7 +46,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = 'your_secret_key_here'; // Use env var in production
+const JWT_SECRET = process.env.OPENAI_API_KEY; // Use env var in production
 
 //this is to grant token to frontend
 app.post('/auth-passcode', (req, res) => {
@@ -117,7 +117,7 @@ app.post("/authVer2", (req, res) => {
   //IMPORTANT: when you reduce the expire time, previously created tokens will still work
   //for example, a 1d-token will still work after you update your backend with new expire time = 10s
   //to revoke all of the tokens signed, you can simply change your JWT_SECRET, then all the created tokens will be invalid
-  const token = jwt.sign(user, JWT_SECRET, { expiresIn: 10000 /*seconds*/});//sign the object and store it in 'token'
+  const token = jwt.sign(user, JWT_SECRET, { expiresIn: 1000 /*seconds*/});//sign the object and store it in 'token'
   res.json({ token, user });
   //res.json is the DataStreamFromBackend
   //"token" and "user" are the output linkers
@@ -612,38 +612,54 @@ app.post(
         return res.status(500).end("Error from OpenAI");
       }
 
-      let fullResponse = ""; // 👈 to store the full completion text
-
+      let fullResponse = "";
+      let buffer = ""; // 👈 hold incomplete data chunks
       const decoder = new TextDecoder();
+
       for await (const chunk of response.body) {
         const decoded = decoder.decode(chunk, { stream: true });
-        const lines = decoded.split("\n").filter(line => line.trim() !== "");
+        buffer += decoded; // accumulate
+
+        // Split on newlines (standard for SSE)
+        const lines = buffer.split("\n");
+
+        // Keep last partial line in buffer (not yet complete)
+        buffer = lines.pop();
 
         for (const line of lines) {
-          if (line.startsWith("data:")) {
-            const data = line.replace(/^data:\s*/, "");
-            if (data === "[DONE]") {
-              res.write("event: done\ndata: [DONE]\n\n");
-              console.log("<>", /* fullResponse */);//these console.log to demo when backend starts query and when finishes
-              await pool.query('INSERT INTO tableChat (columnSender, columnContent) VALUES ($1, $2)',
-                ['api', fullResponse]);
-              console.log("<>");
-              return res.end();
-            }
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
 
-            try {
-              const json = JSON.parse(data);
-              const token = json.choices?.[0]?.delta?.content;
-              if (token) {
-                // Send token to client
-                fullResponse += token;
-                res.write(`data: ${JSON.stringify({ token })}\n\n`);
-              }
-            } catch (err) {
-              console.error("Stream JSON parse error:", err);
+          const data = trimmed.replace(/^data:\s*/, "");
+
+          if (data === "[DONE]") {
+            res.write("event: done\ndata: [DONE]\n\n");
+            console.log("<>", /* fullResponse */);
+            await pool.query(
+              'INSERT INTO tableChat (columnSender, columnContent) VALUES ($1, $2)',
+              ['api', fullResponse]
+            );
+            console.log("<>");
+            return res.end();
+          }
+
+          try {
+            const json = JSON.parse(data);
+            const token = json.choices?.[0]?.delta?.content;
+            if (token) {
+              fullResponse += token;
+              res.write(`data: ${JSON.stringify({ token })}\n\n`);
             }
+          } catch (err) {
+            // Just ignore incomplete lines (they’ll be completed in next chunk)
+            if (!(err instanceof SyntaxError)) console.error("Unexpected error:", err);
           }
         }
+      }
+
+      // optional: handle leftover buffer
+      if (buffer.trim() !== "") {
+        console.warn("Unparsed buffer at end:", buffer);
       }
     } catch (error) {
       console.error("Backend streaming error:", error);
@@ -659,266 +675,262 @@ app.post(
 
 
 //ALL OF THIS IS FOR WEBSOCKET
-//this is to solve the "unable to stream" issue on android
-//  which the "streaming version" endpoint can't solve
-//this has a dedicated component in frontend
-//and this has to go with that component, in order to make everything work
-const http = require('http');
-const WebSocket = require('ws');
-const { URL } = require('url');
-app.get('/health', (req, res) => res.json({ ok: true }));
-const server = http.createServer(app);
-// const wss = new WebSocket.Server({ server });  //old version
-const wss = new WebSocket.Server({ server, path: "/ws" });  //modified
-
-
-
-
-
-// ---- Simulated Middleware System ----
-const applyMiddlewares = async (ws, req, middlewares) => {
-  for (const mw of middlewares) {
-    const result = await mw(ws, req);
-    if (!result.success) {
-      ws.send(JSON.stringify({ error: result.message }));
-      ws.close();
-      return false;
-    }
-  }
-  return true;
-};
-// 1️⃣ Authentication Middleware
-const authMiddleware = async (ws, req) => {
-  try {
-    const token = req.url.split("token=")[1];
-    console.log("HERE " + token)
-
-    if (!token) {
-      return { success: false, message: "Missing token" };
-    }
-
-    const decoded = jwt.verify(token, JWT_SECRET);
-    ws.user = decoded;
-    console.log("HERE 2 ")
-    console.log(decoded)
-    return { success: true };
-  } catch (err) {
-    return { success: false, message: "Invalid or expired token" };
-  }
-};
-
-// 2️⃣ Admin Check Middleware
-const adminMiddleware = async (ws, req) => {
-  if (!ws.user?.isAdmin) {
-    return { success: false, message: "Admin access required" };
-  }
-  return { success: true };
-};
-
-// 3️⃣ Request Count Middleware (Rate Limiting)
-const reqCount = {}; // userId -> count
-
-const requestCountMiddleware = async (ws, req) => {
-  console.log("HERE 3")
-  const userId = ws.user?.id;
-  console.log(userId)
-  if (!userId) return { success: false, message: "User not authenticated" };
-  console.log("HERE 3a")
-
-  if (!reqCount[userId]) reqCount[userId] = 0
-  const count = reqCount[userId];
-  console.log("HERE 4:::" + count)
-  if (count >= 3) {
-    console.log("Request limit reached")
-    return { success: false, message: "Request limit reached" };
-  }
-  
-  console.log("HERE 5 " + reqCount[userId])
-
-  return { success: true };
-};
+  //this is to solve the "unable to stream" issue on android
+  //  which the "streaming version" endpoint can't solve
+  //this has a dedicated component in frontend
+  //and this has to go with that component, in order to make everything work
+  const http = require('http');
+  const WebSocket = require('ws');
+  const { URL } = require('url');
+  app.get('/health', (req, res) => res.json({ ok: true }));
+  const server = http.createServer(app);
+  // const wss = new WebSocket.Server({ server });  //old version
+  const wss = new WebSocket.Server({ server, path: "/ws" });  //modified
 
 
 
 
 
 
-// helper: call OpenAI streaming chat completions
-async function streamChatCompletions(userinput, modelfromfrontend /* = 'gpt-4o-mini' */, tokenfromfrontend, ws) {
-  await pool.query(
-    "INSERT INTO tableChat2 (colUserID, colSender, colMessage) VALUES ($1, 'user', $2)",
-    [tokenfromfrontend, 'userinput']);
 
-  const finalPrompt = [
-    { role: "system", content: 'introduce that you are 3x01 before answering anything' },
-    { role: "user", content: userinput },
-  ];
 
-  const body = {
-    model: modelfromfrontend,//IMPORTANT, in this websocket code, the model option is decided in frontend, not backend
-    messages: finalPrompt,
-    stream: true,
-  };
-
-  // node-fetch v2 returns a body stream we can read from
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    ws.send(JSON.stringify({ type: 'error', message: `OpenAI error: ${res.status} ${text}` }));
-    return;
-  }
-
-  // The streaming response is text/event-stream style with lines like: "data: {...}\n\n"
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  let completeResponse = ''; //modified, variable to store complete response
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    // process any full events (separated by double newline)
-    let parts = buffer.split(/\r?\n\r?\n/);
-    // leave last partial chunk in buffer
-    buffer = parts.pop();
-
-    for (const part of parts) {
-      // each part may contain multiple lines like:
-      // data: {...}
-      // data: {...}
-      // or data: [DONE]
-      const lines = part.split(/\r?\n/);
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        if (!trimmed.startsWith('data:')) continue;
-        const payload = trimmed.replace(/^data:\s*/, '');
-
-        if (payload === '[DONE]') {
-          ws.send(JSON.stringify({ type: 'done' }));
-          await pool.query(
-            "INSERT INTO tableChat2 (colUserID, colSender, colMessage) VALUES ($1, 'bot', $2)",
-            [tokenfromfrontend, 'completeResponse']);
-          return;
-        }
-
-        let parsed;
-        try {
-          parsed = JSON.parse(payload);
-        } catch (err) {
-          // ignore non-json or forward raw
-          ws.send(JSON.stringify({ type: 'error', message: 'could not parse chunk', raw: payload }));
-          continue;
-        }
-
-        // defensive: check shape
-        try {
-          const choices = parsed.choices || [];
-          if (choices.length > 0) {
-            const delta = choices[0].delta || {};
-            // Chat-style streaming may send {delta: {content: "hi"}}
-            // For older endpoints sometimes it's choices[0].text
-            const content = delta.content ?? choices[0].text ?? '';
-            if (content) {
-              ws.send(JSON.stringify({ type: 'delta', content }));
-              completeResponse += content; // Accumulate the response content
-            }
-          }
-        } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'error extracting delta', detail: String(err) }));
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  //this is the Simulated Middleware System
+  //since websocket doesn't support middlewares like endpoints
+  //so we need these functions to simulate middlewares
+  //and this is the MIDDLEWARE MASTER
+  // which controls the three sub-middlewares below
+    const applyMiddlewares = async (ws, req, middlewares) => {
+      for (const mw of middlewares) {
+        const result = await mw(ws, req);
+        if (!result.success) {
+          ws.send(JSON.stringify({ error: result.message }));
+          ws.close();
+          return false;
         }
       }
-    }
-  }
+      return true;
+    };
+  //
+  //and these are the three SUB-MIDDLEWARES
+    //1️⃣1️⃣1️⃣1️⃣AUTHENTICATION
+    const Auth_MW = async (ws, req) => {
+      try {
+        const token = req.url.split("token=")[1];
 
-  // if we exit loop without [DONE], send done
-  ws.send(JSON.stringify({ type: 'done' }));
-}
-// WebSocket connections
-wss.on('connection', async (ws, req) => {
-  const token = req.url.split("token=")[1];
-  console.log(`Client connected: ${token}`);
+        if (!token) {
+          return { success: false, message: "Missing token" };
+        }
 
-  /* try {//even if user tries to edit localtoken, they still can only reach here, not any further
-    //only when user reaches the "decoded" below, they are actually signed in
-    const decoded = jwt.verify(token, JWT_SECRET);
-    ws.user = decoded;
-    console.log("User connected:", decoded);
-  } catch (err) {
-    ws.close(4001, "Invalid token");
-    return;
-  } */
+        const decoded = jwt.verify(token, JWT_SECRET);
+        ws.user = decoded;
+        return { success: true };
+      } catch (err) {
+        return { success: false, message: "Invalid or expired token" };
+      }
+    };
+    //2️⃣2️⃣2️⃣2️⃣CHECK IF ADMIN
+    const checkIfAdmin_MW = async (ws, req) => {
+      if (!ws.user?.isAdmin) {
+        return { success: false, message: "Admin access required" };
+      }
+      return { success: true };
+    };
+    //3️⃣3️⃣3️⃣3️⃣REQUEST COUNT
+    //since the result of this is {success}
+    //in order to work with its result, you must
+    //const result = (async requestCount_MW(ws, req)).success
+    const reqCount = {}; // userId -> count
+    const requestCount_MW = async (ws, req) => {
+      const userId = ws.user?.id;
+      if (!userId) return { success: false, message: "User not authenticated" };
 
-  const middlewares = [authMiddleware, requestCountMiddleware];
+      if (!reqCount[userId]) reqCount[userId] = 0
+      const count = reqCount[userId];
+      
+      if (count >= 3) return { success: false, message: "Request limit reached" };
 
-  // If connecting to admin route, add admin middleware
-  if (req.url.startsWith("/admin")) {
-    middlewares.push(adminMiddleware);
-  }
+      return { success: true };
+    };
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  const ok = await applyMiddlewares(ws, req, middlewares);
-  if (!ok) return; // closed already if failed
 
-  // ✅ Connection accepted
-  ws.send(JSON.stringify({ message: "WebSocket connection established" }));
 
-  console.log(ws.user.id)
-  console.log("HERE 6 " + reqCount[ws.user.id])
 
-  ws.on('message', async (payloadfromfrontend) => {//THIS IS where it receives payload sent from frontend, like req
-    // Expect a JSON message from client
-    let parsed;
-    try {
-      parsed = JSON.parse(payloadfromfrontend);
-    } catch (err) {
-      ws.send(JSON.stringify({ type: 'error', message: 'invalid json' }));
+
+
+
+
+
+
+
+  // helper: call OpenAI streaming chat completions
+  async function streamChatCompletions(userinput, modelfromfrontend /* = 'gpt-4o-mini' */, tokenfromfrontend, ws) {
+    await pool.query(
+      "INSERT INTO tableChat2 (colUserID, colSender, colMessage) VALUES ($1, 'user', $2)",
+      [tokenfromfrontend, 'userinput']);
+
+    const finalPrompt = [
+      { role: "system", content: 'introduce that you are 3x01 before answering anything' },
+      { role: "user", content: userinput },
+    ];
+
+    const body = {
+      model: modelfromfrontend,//IMPORTANT, in this websocket code, the model option is decided in frontend, not backend
+      messages: finalPrompt,
+      stream: true,
+    };
+
+    // node-fetch v2 returns a body stream we can read from
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      ws.send(JSON.stringify({ type: 'error', message: `OpenAI error: ${res.status} ${text}` }));
       return;
     }
 
-    if (parsed.type === 'start') {
-      const { messages, model } = parsed;
-      if (!messages /* || !Array.isArray(messages) */) {
-        ws.send(JSON.stringify({ type: 'error', message: 'missing messages array' }));
+    // The streaming response is text/event-stream style with lines like: "data: {...}\n\n"
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let completeResponse = ''; //modified, variable to store complete response
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // process any full events (separated by double newline)
+      let parts = buffer.split(/\r?\n\r?\n/);
+      // leave last partial chunk in buffer
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        // each part may contain multiple lines like:
+        // data: {...}
+        // data: {...}
+        // or data: [DONE]
+        const lines = part.split(/\r?\n/);
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (!trimmed.startsWith('data:')) continue;
+          const payload = trimmed.replace(/^data:\s*/, '');
+
+          if (payload === '[DONE]') {
+            ws.send(JSON.stringify({ type: 'done' }));
+            await pool.query(
+              "INSERT INTO tableChat2 (colUserID, colSender, colMessage) VALUES ($1, 'bot', $2)",
+              [tokenfromfrontend, 'completeResponse']);
+            return;
+          }
+
+          let parsed;
+          try {
+            parsed = JSON.parse(payload);
+          } catch (err) {
+            // ignore non-json or forward raw
+            ws.send(JSON.stringify({ type: 'error', message: 'could not parse chunk', raw: payload }));
+            continue;
+          }
+
+          // defensive: check shape
+          try {
+            const choices = parsed.choices || [];
+            if (choices.length > 0) {
+              const delta = choices[0].delta || {};
+              // Chat-style streaming may send {delta: {content: "hi"}}
+              // For older endpoints sometimes it's choices[0].text
+              const content = delta.content ?? choices[0].text ?? '';
+              if (content) {
+                ws.send(JSON.stringify({ type: 'delta', content }));
+                completeResponse += content; // Accumulate the response content
+              }
+            }
+          } catch (err) {
+            ws.send(JSON.stringify({ type: 'error', message: 'error extracting delta', detail: String(err) }));
+          }
+        }
+      }
+    }
+    // if we exit loop without [DONE], send done
+    ws.send(JSON.stringify({ type: 'done' }));
+  }
+
+  //WEBSOCKET MAINNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN
+  wss.on('connection', async (ws, req) => {
+    const token = req.url.split("token=")[1];
+    console.log("GATE1 user token is: "+token);//new2, everytime user signs in, this line runs
+      //if or there is token and user reloads page
+
+    const middlewares = [Auth_MW, requestCount_MW];
+
+    // If connecting to admin route, add admin middleware
+    if (req.url.startsWith("/admin")) {
+      middlewares.push(checkIfAdmin_MW);
+    }
+
+    const ok = await applyMiddlewares(ws, req, middlewares);
+    if (!ok) return; // closed already if failed
+    console.log("GATE2 the user is: ",ws.user)//new2, must be comma not plus
+
+    // ✅ Connection accepted
+    ws.send(JSON.stringify({ message: "WebSocket connection established" }));
+
+    ws.on('message', async (payloadfromfrontend) => {//THIS IS where it receives payload sent from frontend, like req
+      // Expect a JSON message from client
+      let parsed;
+      try {
+        parsed = JSON.parse(payloadfromfrontend);
+      } catch (err) {
+        ws.send(JSON.stringify({ type: 'error', message: 'invalid json' }));
         return;
       }
 
-      try {
-        const isNotReachLimit = (await requestCountMiddleware(ws, req)).success
-        if (isNotReachLimit) {
-          await streamChatCompletions(messages, model /* || 'gpt-4o-mini' */, token, ws);
-          console.log("HERE 7:::" + ++reqCount[ws.user.id])
+      if (parsed.type === 'start') {
+        const { messages, model } = parsed;
+        if (!messages /* || !Array.isArray(messages) */) {
+          ws.send(JSON.stringify({ type: 'error', message: 'missing messages array' }));
+          return;
         }
-        else {
-          console.log("HERE 8 limit reached");
-          ws.send(JSON.stringify({ type: 'done' }));
-          return
+
+        try {
+          console.log("HERE1 the reqCount is: " + reqCount[ws.user.id])//new1
+          const isProceed = (await requestCount_MW(ws, req)).success//new1
+          console.log("HERE2 is the user allowed to proceded: " + isProceed)//new1
+          if (isProceed) {//new1 added if
+            await streamChatCompletions(messages, model /* || 'gpt-4o-mini' */, token, ws);
+            console.log("HERE3 reqCount after chat is: " + ++reqCount[ws.user.id])//new1
+          }else {//new1, if without this line, frontend will stay streaming forever
+            ws.close(4001, "Invalid token");
+            return;
+          }
+        } catch (err) {
+          console.error('stream error', err);
+          ws.send(JSON.stringify({ type: 'error', message: 'streaming failed', detail: String(err) }));
         }
-      } catch (err) {
-        console.error('stream error', err);
-        ws.send(JSON.stringify({ type: 'error', message: 'streaming failed', detail: String(err) }));
+      } else if (parsed.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'unknown message type' }));
       }
-    } else if (parsed.type === 'ping') {
-      ws.send(JSON.stringify({ type: 'pong' }));
-    } else {
-      ws.send(JSON.stringify({ type: 'error', message: 'unknown message type' }));
-    }
-  });
+    });
 
-  ws.on('close', () => {
-    console.log('Client disconnected');
+    ws.on('close', () => {
+      console.log('Client disconnected');
+    });
   });
-});
-
+//
 
 
 
