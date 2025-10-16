@@ -552,12 +552,11 @@ app.post("/gpt-non-streaming",//new4
     //if the systemprompt is not correct, check following precautions
     // have you sent systemprompt to db, restarted your backend after sending so it can fetch the new systemprompt
     // check your systemprompt source, is the source correct
-    const systemPrompt = dbSystemPrompt;
-    console.log(systemPrompt)
-
+    const systemPrompt = 'dbSystemPrompt';
+    console.log("THE FINAL SYSTEMPROMPT is: " + systemPrompt)
     // Create the messages array (system + user)
     const finalPrompt = [
-      { role: "system", content: 'systemPrompt' },
+      { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ];
 
@@ -720,7 +719,9 @@ app.post(
   const wss = new WebSocket.Server({ server, path: "/ws" });  //modified
 
 
-
+// Disable the default 5-minute timeout
+server.timeout = 0; // never timeout
+server.keepAliveTimeout = 0;
 
 
 
@@ -1036,17 +1037,54 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
 
 
 
+// cs('hello')
+function cs(aa) { console.log(aa) }
+// cs('hello')
+// cs(123)
+// cs(true)
+
+// let sum = 0
+// for (let i = 1; i <= 1000; i++) {
+//   sum += i
+//   //cs(i)
+// }
+// cs(sum)
+
+//if you change app.get into app.post
+//it may not work at all
+//since app.get only require params from url
+//while app.post requires {method, headers, body}
+//you should understand, and never swap app.get and app.post
+//if you wanna use app.post
+//  in frontend, there must be {method, headers, body}
+//  in backend, const { frontendVar } = req.body
+//if you wanna use an endpoint to call another endpoint, do the same
+
+//below is very good example of how data flows from frontend => 1st endpoint => 2nd endpoint
+//and flows back from 2nd endpoint => 1st endpoint => frontend
+
 // Endpoint 1: called by frontend
-app.get("/api/start", async (req, res) => {
+app.post("/api/start", async (req, res) => {
   console.log("Frontend requested /api/start");
+  const { delaysimulation } = req.body//step1: where 1st endpoint receives data from frontend
+  cs("FIRST ENDPOINT: " + delaysimulation)
 
   try {
-    // Call the slow endpoint
-    const slowResponse = await fetch("http://localhost:5000/api/slow");
-    const data = await slowResponse.text();
+    // Explicitly set timeout for the fetch request to unlimited
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {}, 0); // no-op
+    const slowResponse = await fetch("http://localhost:5000/api/slow", {
+      signal: controller.signal,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ delaysimulation }),//step2: where 1st endpoint sends data to 2nd endpoint
+    });
+    const data = await slowResponse.text();//step5: where 1st endpoint receives response from 2nd endpoint
 
     // Respond immediately after slow endpoint finishes
-    res.send(`✅ Done waiting! Slow endpoint said: ${data}`);
+    res.send(`✅ Done waiting! Slow endpoint said: ${data}`);//step6: where 1st endpoint responds to frontend
   } catch (error) {
     console.error(error);
     res.status(500).send("Error calling slow endpoint");
@@ -1054,14 +1092,18 @@ app.get("/api/start", async (req, res) => {
 });
 
 // Endpoint 2: slow response
-app.get("/api/slow", async (req, res) => {
+app.post("/api/slow", async (req, res) => {
   console.log("Slow endpoint started — waiting 10 minutes...");
+  const { delaysimulation } = req.body//step3: where 2nd endpoint receives data from 1st endpoint
+  cs("SECOND ENDPOINT: " + delaysimulation)
 
   // Wait for 10 minutes (600000 ms)
-  await new Promise((resolve) => setTimeout(resolve, 360000));
+  await new Promise((resolve) => setTimeout(resolve, delaysimulation));
+  //4m30s is a safe waiting time to avoid timeout error
+  //5m00s is still okay but dangerous
 
   console.log("Slow endpoint finished.");
-  res.send("⏰ Finished after 10 minutes");
+  res.send("⏰ Finished after 10 minutes");//step4: where 2nd endpoint returns data to 1st endpoint
 });
 
 
