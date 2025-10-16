@@ -192,11 +192,12 @@ app.get("/foradmin", authenticateTokenVer2, checkIfAdmin, checkNumberOfRequests,
 
 //THIS IS AUTHVER3
 //it features username and password
-  const userArray = [
-    { id: 1, username: "admin", password: "321", role: "admin" },
-    { id: 41, username: "alice", password: "123", role: "user" },
-    { id: 42, username: "bob", password: "456", role: "user" },
-    { id: 43, username: "carl", password: "789", role: "user" },
+  const userArray = [//new3.
+    { id: 1, username: "admin", password: "321", role: "admin", realname: "nxp" },
+    { id: 41, username: "alice", password: "123", role: "user", realname: "nxp" },
+    { id: 42, username: "bob", password: "456", role: "user", realname: "nxp" },
+    { id: 43, username: "carl", password: "789", role: "user", realname: "nxp" },
+    { id: 501, username: "u0125", password: "563g43ff", role: "user", realname: "tc anh" },
   ];
   app.post("/authVer3", (req, res) => {
     const { username, password } = req.body;
@@ -524,13 +525,13 @@ app.post("/api/chat", async (req, res) => {
 //but can access env file
 
 
-/* //NON-STREAMING VERSION, IF YOU WANNA USE THIS ENDPOINT, PLEASE DISABLE THE STREAMING VERSION
-MAKE SURE IT GOES WITH THE NON-STREAMING VERSION IN FRONTEND TOO
+//NON-STREAMING VERSION, IF YOU WANNA USE THIS ENDPOINT, PLEASE DISABLE THE STREAMING VERSION
+//MAKE SURE IT GOES WITH THE NON-STREAMING VERSION IN FRONTEND TOO
 //derived from /api/chat
 //this gpt endpoint is for you admin, you can ask anything
 //you can change the model below to make it smarter
 //but it also has promptCounter to simulate real user interactions
-app.post("/gptgeneralProtectedBackend",
+app.post("/gpt-non-streaming",//new4
   authenticateTokenVer2, checkIfAdmin, checkNumberOfRequests, async (req, res) => {
   try {
     const userPrompt = req.body.prompt;
@@ -556,7 +557,7 @@ app.post("/gptgeneralProtectedBackend",
 
     // Create the messages array (system + user)
     const finalPrompt = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: 'systemPrompt' },
       { role: "user", content: userPrompt },
     ];
 
@@ -595,12 +596,12 @@ app.post("/gptgeneralProtectedBackend",
     console.error(error);
     res.status(500).json({ error: "Something went wrong" });
   }
-}); */
+});
 
 //THE STREAMING VERSION, the purpose of this is to prevent waiting timeout due to long response
 //MAKE SURE IT GOES WITH THE STREAMING VERSION IN FRONTEND, AND DISABLE THE NON-STREAMING IN BACKEND TOO
 app.post(
-  "/gptgeneralProtectedBackend",
+  "/gpt-streaming",//new4
   authenticateTokenVer2,
   checkIfAdmin,
   checkNumberOfRequests,
@@ -804,7 +805,7 @@ app.post(
       [tokenfromfrontend, 'userinput']);
 
     const finalPrompt = [
-      { role: "system", content: 'introduce that you are 3x01 before answering anything' },
+      { role: "system", content: dbSystemPrompt },
       { role: "user", content: userinput },
     ];
 
@@ -940,7 +941,7 @@ app.post(
           const isProceed = (await requestCount_MW(ws, req)).success//new1
           console.log("HERE2 is the user allowed to proceded: " + isProceed)//new1
           if (isProceed) {//new1 added if
-            await streamChatCompletions(messages, model /* || 'gpt-4o-mini' */, token, ws);
+            await streamChatCompletions(messages, model /* || 'gpt-4o-mini' */, ws.user.id, ws);
             console.log("HERE3 reqCount after chat is: " + ++reqCount[ws.user.id])//new1
           }else {//new1, if without this line, frontend will stay streaming forever
             ws.close(4001, "Invalid token");
@@ -1035,7 +1036,33 @@ app.post("/api/analyze-image", upload.single("image"), async (req, res) => {
 
 
 
+// Endpoint 1: called by frontend
+app.get("/api/start", async (req, res) => {
+  console.log("Frontend requested /api/start");
 
+  try {
+    // Call the slow endpoint
+    const slowResponse = await fetch("http://localhost:5000/api/slow");
+    const data = await slowResponse.text();
+
+    // Respond immediately after slow endpoint finishes
+    res.send(`✅ Done waiting! Slow endpoint said: ${data}`);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Error calling slow endpoint");
+  }
+});
+
+// Endpoint 2: slow response
+app.get("/api/slow", async (req, res) => {
+  console.log("Slow endpoint started — waiting 10 minutes...");
+
+  // Wait for 10 minutes (600000 ms)
+  await new Promise((resolve) => setTimeout(resolve, 360000));
+
+  console.log("Slow endpoint finished.");
+  res.send("⏰ Finished after 10 minutes");
+});
 
 
 
