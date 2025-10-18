@@ -1089,11 +1089,11 @@ app.post("/api/start", async (req, res) => {
 // Endpoint 2: slow response
 app.post("/api/slow", async (req, res) => {
   console.log("Slow endpoint started — waiting 10 minutes...");
-  const { delaysimulation } = req.body//step3: where 2nd endpoint receives data from 1st endpoint
-  cs("SECOND ENDPOINT: " + delaysimulation)
+  // const { delaysimulation } = req.body//step3: where 2nd endpoint receives data from 1st endpoint
+  cs("SECOND ENDPOINT: " + 'delaysimulation')
 
   // Wait for 10 minutes (600000 ms)
-  await new Promise((resolve) => setTimeout(resolve, delaysimulation));
+  await new Promise((resolve) => setTimeout(resolve, 5000));
   //4m30s is a safe waiting time to avoid timeout error
   //5m00s is still okay but dangerous
 
@@ -1103,7 +1103,7 @@ app.post("/api/slow", async (req, res) => {
 
 
 // endpoint1 proxies the streaming response to frontend
-app.get("/endpoint1", async (req, res) => {
+app.get("/endpoint1old", async (req, res) => {
   const response = await fetch("http://localhost:5000/endpoint2");
 
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -1112,7 +1112,11 @@ app.get("/endpoint1", async (req, res) => {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
 
+  cs('starts the clock')
+  await new Promise((r) => setTimeout(r, 400_000));
+
   async function streamChunks() {
+    cs('if you see this line, it means 6 minutes have passed')
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -1123,6 +1127,29 @@ app.get("/endpoint1", async (req, res) => {
   }
 
   streamChunks();
+});
+
+
+const axios = require('axios');
+app.get('/endpoint1', async (req, res) => {
+    try {
+        cs('finallyyyyyyyyyyyyyyyyyyyyyyyyyyyy')
+        const response = await axios.get('http://localhost:5000/api/slow', {
+            timeout: 10 * 60 * 1000 // Set timeout to 10 minutes
+        });
+        res.send(response.text());
+    } catch (error) {
+        if (error.response) {
+            // The request was made and the server responded with a status code
+            res.status(error.response.status).json({ message: error.response.data });
+        } else if (error.request) {
+            // The request was made but no response was received
+            res.status(504).json({ message: 'No response received from endpoint2' });
+        } else {
+            // Something happened in setting up the request
+            res.status(500).json({ message: error.message });
+        }
+    }
 });
 
 
@@ -1137,13 +1164,99 @@ app.get("/endpoint2", async (req, res) => {
     res.write(`middle haha`);
   }, 2_000);
 
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 10; i++) {
     res.write(' ' + i + " ");
-    await new Promise((r) => setTimeout(r, 1000)); // simulate delay.
+    await new Promise((r) => setTimeout(r, 1000)); // simulate delay
   }
 
   res.end();
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// store pending requests
+let pendingRequests = new Map();
+
+// --- endpoint1: called by frontend ---
+app.get('/endpoint1new', async (req, res) => {
+  const requestId = Date.now().toString();
+
+  setTimeout(() => {
+    cs(`every second`);
+  }, 1_000);
+
+  console.log(`Endpoint1: WWWgot request ${requestId}`);
+
+  try {
+    // call endpoint2
+    await axios.post(`http://localhost:${PORT}/endpoint2b`, { requestId });
+
+    console.log(`Endpoint1: waiting for response to ${requestId}`);
+
+    // wait for up to 10 minutes for endpoint2 to respond
+    const result = await waitForResponse(requestId, 660_000);//step1
+
+    console.log(`Endpoint1: received delayed response for ${requestId}`);
+    res.json({ status: 'ok', data: result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// --- endpoint2: simulates async delay then replies back to endpoint1 ---
+app.post('/endpoint2b', async (req, res) => {
+  const { requestId } = req.body;
+
+  console.log(`Endpoint2: received request ${requestId}`);
+
+  // simulate 10-minute async delay.
+  setTimeout(() => {
+    console.log(`Endpoint2: sending response for ${requestId}`);
+    resolvePendingRequest(requestId, { message: `Response after 10 minutes for ${requestId}` });
+  }, 400_000);
+
+  res.json({ status: 'processing', requestId });
+});
+
+// --- helper: store promises for pending responses ---
+function waitForResponse(id, timeout) {//step2, id, 660s
+  return new Promise((resolve, reject) => {
+
+    const timer = setTimeout(() => {
+      pendingRequests.delete(id);
+      reject(new Error('Timeout waiting for response'));
+    }, timeout);
+
+    pendingRequests.set(id, { resolve, timer });
+    
+  });
+}
+
+function resolvePendingRequest(id, data) {
+  cs(data.message)
+  const entry = pendingRequests.get(id);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  entry.resolve(data);
+  pendingRequests.delete(id);
+}
+
+
+
+
 
 
 app.get('/', (req, res) => {
