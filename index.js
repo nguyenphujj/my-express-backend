@@ -719,9 +719,7 @@ app.post(
   const wss = new WebSocket.Server({ server, path: "/ws" });  //modified
 
 
-// Disable the default 5-minute timeout
-server.timeout = 0; // never timeout
-server.keepAliveTimeout = 0;
+
 
 
 
@@ -1070,11 +1068,8 @@ app.post("/api/start", async (req, res) => {
   cs("FIRST ENDPOINT: " + delaysimulation)
 
   try {
-    // Explicitly set timeout for the fetch request to unlimited
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {}, 0); // no-op
+    // Call the slow endpoint
     const slowResponse = await fetch("http://localhost:5000/api/slow", {
-      signal: controller.signal,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1107,7 +1102,48 @@ app.post("/api/slow", async (req, res) => {
 });
 
 
+// endpoint1 proxies the streaming response to frontend
+app.get("/endpoint1", async (req, res) => {
+  const response = await fetch("http://localhost:5000/endpoint2");
 
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Transfer-Encoding", "chunked");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  async function streamChunks() {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      res.write(chunk); // send chunk immediately to frontend
+    }
+    res.end();
+  }
+
+  streamChunks();
+});
+
+
+// Simulate streaming data from endpoint2
+app.get("/endpoint2", async (req, res) => {
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Transfer-Encoding", "chunked");
+
+  const messages = ["Hello", "from", "endpoint2", "in", "chunks!"];
+
+  setInterval(() => {
+    res.write(`middle haha`);
+  }, 2_000);
+
+  for (let i = 0; i < 2; i++) {
+    res.write(' ' + i + " ");
+    await new Promise((r) => setTimeout(r, 1000)); // simulate delay.
+  }
+
+  res.end();
+});
 
 
 app.get('/', (req, res) => {
